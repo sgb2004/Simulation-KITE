@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LITE Compiler Simulation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;700&family=Inter:wght@400;700&display=swap');
+
+  body { background: #121212; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; font-family: 'Inter', sans-serif; color: #F5F5F5; overflow: hidden; }
+  .sim-container { width: 100%; height: 100vh; background: #121212; padding: 25px; box-sizing: border-box; display: flex; flex-direction: column; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 15px; flex-shrink: 0; }
+  .title { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 2px; }
+  .phase-title { font-size: 24px; font-weight: bold; color: #00E5FF; }
+
+  .progress-bar { width: 100%; height: 4px; background: #333; border-radius: 2px; margin-bottom: 25px; overflow: hidden; flex-shrink: 0; }
+  .progress-fill { height: 100%; width: 14%; background: #00E5FF; transition: width 0.4s ease; }
+
+  .visualization-area { flex-grow: 1; background: #0D0D0D; border-radius: 8px; border: 1px solid #222; padding: 25px; position: relative; overflow: hidden; font-family: 'Fira Code', monospace; display: flex; justify-content: center; align-items: center; }
+
+  .controls { display: flex; justify-content: space-between; margin-top: 25px; flex-shrink: 0; }
+  button { background: #00E5FF; color: #121212; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; transition: 0.2s; }
+  button:hover:not(:disabled) { background: #00B3CC; transform: translateY(-2px); }
+  button:disabled { background: #333; color: #666; cursor: not-allowed; transform: none; }
+  .btn-outline { background: transparent; border: 1px solid #00E5FF; color: #00E5FF; }
+
+  /* Animations & Elements */
+  .code-line { margin: 0 0 10px 0; font-size: 20px; color: #A8B2C1; opacity: 0; animation: fadeInRight 0.5s forwards; width: 100%; text-align: left; }
+  .token { display: inline-block; background: #222; border: 1px solid #444; padding: 8px 12px; border-radius: 4px; margin: 6px; font-size: 16px; opacity: 0; animation: popIn 0.3s forwards; }
+  .t-type { color: #C678DD; border-color: #C678DD; } .t-id { color: #61AFEF; border-color: #61AFEF; } .t-op { color: #E5C07B; border-color: #E5C07B; }
+
+  /* Tree CSS */
+  .tree-wrapper { display: flex; justify-content: center; transform: scale(0.9); animation: slideDown 0.5s forwards; }
+  .tree ul { padding-top: 20px; position: relative; display: flex; justify-content: center; padding-left: 0; }
+  .tree li { float: left; text-align: center; list-style-type: none; position: relative; padding: 20px 5px 0 5px; }
+  .tree li::before, .tree li::after { content: ''; position: absolute; top: 0; right: 50%; border-top: 2px solid #444; width: 50%; height: 20px; }
+  .tree li::after { right: auto; left: 50%; border-left: 2px solid #444; }
+  .tree li:only-child::after, .tree li:only-child::before { display: none; }
+  .tree li:only-child { padding-top: 0; }
+  .tree li:first-child::before, .tree li:last-child::after { border: 0 none; }
+  .tree li:last-child::before { border-right: 2px solid #444; border-radius: 0 5px 0 0; }
+  .tree li:first-child::after { border-radius: 5px 0 0 0; }
+  .tree ul ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid #444; width: 0; height: 20px; }
+
+  .tree li .node-box { border: 2px solid #00E5FF; padding: 12px 18px; color: #F5F5F5; font-size: 14px; display: inline-block; border-radius: 6px; background: #1A1A1A; position: relative; }
+  .tree li .node-box span { font-weight: bold; font-size: 16px; }
+  .semantic-tag { position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%); background: #98C379; color: #121212; font-size: 12px; font-weight: bold; padding: 3px 10px; border-radius: 12px; opacity: 0; animation: popIn 0.5s forwards; white-space: nowrap; }
+
+  .ir-line { color: #E5C07B; font-size: 22px; margin-bottom: 12px; opacity: 0; animation: fadeInRight 0.3s forwards; width: 100%; text-align: left; }
+  .strike { text-decoration: line-through; color: #555; }
+  .opt-line { color: #98C379; font-weight: bold; }
+  .asm-line { color: #D19A66; font-size: 22px; margin-bottom: 12px; opacity: 0; animation: fadeInUp 0.4s forwards; width: 100%; text-align: left; }
+
+  @keyframes fadeInRight { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+  @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body>
+
+<div class="sim-container">
+  <div class="header">
+    <div class="title">LITE Compiler Pipeline</div>
+    <div class="phase-title" id="phaseTitle">1. Source Code</div>
+  </div>
+  
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill"></div>
+  </div>
+
+  <div class="visualization-area" id="visArea"></div>
+
+  <div class="controls">
+    <button id="btnPrev" onclick="changePhase(-1)" disabled>❮ Previous</button>
+    <button id="btnReplay" onclick="renderPhase(currentPhase)" class="btn-outline">↻ Replay Phase</button>
+    <button id="btnNext" onclick="changePhase(1)">Next Phase ❯</button>
+  </div>
+</div>
+
+<script>
+  const phases = [
+    { title: "1. Source Code", draw: drawSource },
+    { title: "2. Lexical Analysis (Tokens)", draw: drawLexer },
+    { title: "3. Syntax Analysis (AST Tree)", draw: drawAST },
+    { title: "4. Semantic Analysis", draw: drawSemantic },
+    { title: "5. Intermediate Representation", draw: drawIR },
+    { title: "6. Code Optimization", draw: drawOpt },
+    { title: "7. Target Assembly (Xtensa)", draw: drawAsm }
+  ];
+
+  let currentPhase = 0;
+  const visArea = document.getElementById('visArea');
+
+  function changePhase(dir) {
+    currentPhase += dir;
+    if (currentPhase < 0) currentPhase = 0;
+    if (currentPhase >= phases.length) currentPhase = phases.length - 1;
+    renderPhase(currentPhase);
+  }
+
+  function renderPhase(idx) {
+    document.getElementById('phaseTitle').innerText = phases[idx].title;
+    document.getElementById('progressFill').style.width = `${((idx + 1) / phases.length) * 100}%`;
+    document.getElementById('btnPrev').disabled = idx === 0;
+    document.getElementById('btnNext').disabled = idx === phases.length - 1;
+    visArea.innerHTML = ""; 
+    
+    // Create a container to center the text blocks properly
+    const contentBox = document.createElement('div');
+    if(idx !== 2 && idx !== 3) {
+        contentBox.style.width = "60%";
+    }
+    visArea.appendChild(contentBox);
+    phases[idx].draw(contentBox);
+  }
+
+  function drawSource(box) {
+    const lines = [ "twice : num : num x :", "  num x2 = 2 * x", "  done : x2 :" ];
+    lines.forEach((line, i) => {
+      box.innerHTML += `<div class="code-line" style="animation-delay: ${i*0.3}s">${line.replace(/ /g, '&nbsp;')}</div>`;
+    });
+  }
+
+  function drawLexer(box) {
+    box.style.width = "90%";
+    box.style.textAlign = "center";
+    const tokens = [
+      { c: 't-id', t: 'ID: twice' }, { c: 't-op', t: 'PUNCT: :' }, { c: 't-type', t: 'TYPE: num' }, 
+      { c: 't-op', t: 'PUNCT: :' }, { c: 't-type', t: 'TYPE: num' }, { c: 't-id', t: 'ID: x' }, { c: 't-op', t: 'PUNCT: :' },
+      { c: '', t: '<br><br>' },
+      { c: 't-type', t: 'TYPE: num' }, { c: 't-id', t: 'ID: x2' }, { c: 't-op', t: 'OP: =' }, 
+      { c: 't-type', t: 'LIT: 2' }, { c: 't-op', t: 'OP: *' }, { c: 't-id', t: 'ID: x' },
+      { c: '', t: '<br><br>' },
+      { c: 't-id', t: 'KEY: done' }, { c: 't-op', t: 'PUNCT: :' }, { c: 't-id', t: 'ID: x2' }, { c: 't-op', t: 'PUNCT: :' }
+    ];
+    let html = "";
+    tokens.forEach((tk, i) => {
+      if(tk.t.includes('<br>')) html += tk.t;
+      else html += `<div class="token ${tk.c}" style="animation-delay: ${i*0.03}s">[${tk.t}]</div>`;
+    });
+    box.innerHTML = html;
+  }
+
+  function getTreeHTML(semantic) {
+    const t1 = semantic ? '<div class="semantic-tag" style="animation-delay: 0.8s">Sig Valid</div>' : '';
+    const t2 = semantic ? '<div class="semantic-tag" style="animation-delay: 1.2s">Type: num</div>' : '';
+    const t3 = semantic ? '<div class="semantic-tag" style="animation-delay: 1.6s">num * num</div>' : '';
+    
+    return `
+    <div class="tree-wrapper">
+      <div class="tree">
+        <ul>
+          <li>
+            <div class="node-box">FuncDecl<br><span style="color:#C678DD">twice</span>${t1}</div>
+            <ul>
+              <li>
+                <div class="node-box">Params</div>
+                <ul>
+                  <li><div class="node-box">Param<br><span style="color:#61AFEF">x</span>${t2}</div></li>
+                </ul>
+              </li>
+              <li>
+                <div class="node-box">Block</div>
+                <ul>
+                  <li>
+                    <div class="node-box">Assign<br><span style="color:#E5C07B">x2</span></div>
+                    <ul>
+                      <li>
+                        <div class="node-box">Multiply<br><span style="color:#00E5FF">*</span>${t3}</div>
+                        <ul>
+                          <li><div class="node-box">Literal<br><span style="color:#98C379">2</span></div></li>
+                          <li><div class="node-box">Identifier<br><span style="color:#61AFEF">x</span></div></li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="node-box">Return</div>
+                    <ul>
+                      <li><div class="node-box">Identifier<br><span style="color:#E5C07B">x2</span></div></li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </div>`;
+  }
+
+  function drawAST(box) { box.innerHTML = getTreeHTML(false); }
+  function drawSemantic(box) { box.innerHTML = getTreeHTML(true); }
+
+  function drawIR(box) {
+    const lines = [ "twice:", "  param x", "  t1 = 2 * x", "  x2 = t1", "  ret x2" ];
+    lines.forEach((line, i) => {
+      box.innerHTML += `<div class="ir-line" style="animation-delay: ${i*0.2}s">${line.replace(/ /g, '&nbsp;')}</div>`;
+    });
+  }
+
+  function drawOpt(box) {
+    box.innerHTML = `
+      <div class="ir-line">twice:</div>
+      <div class="ir-line">  param x</div>
+      <div class="ir-line strike" style="animation-delay: 0.5s">  t1 = 2 * x</div>
+      <div class="ir-line opt-line" style="animation-delay: 1.0s">  t1 = x << 1  <span style="color:#666; font-size:16px">// Math to Bitshift</span></div>
+      <div class="ir-line strike" style="animation-delay: 1.5s">  x2 = t1      <span style="color:#666; font-size:16px">// Dead Code Eliminated</span></div>
+      <div class="ir-line opt-line" style="animation-delay: 2.0s">  ret t1</div>
+    `;
+  }
+
+  function drawAsm(box) {
+    const lines = [ "_twice_func:", "  entry a1, 32", "  slli a2, a2, 1   # Hardware bitshift", "  retw" ];
+    lines.forEach((line, i) => {
+      box.innerHTML += `<div class="asm-line" style="animation-delay: ${i*0.2}s">${line.replace(/ /g, '&nbsp;')}</div>`;
+    });
+  }
+
+  renderPhase(0);
+</script>
+</body>
+</html>
