@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LITE Runtime Visualizer</title>
+    <style>
+        :root {
+            --bg-base: #050505;
+            --panel-bg: #0f0f0f;
+            --border-color: #333;
+            --text-main: #e0e0e0;
+            --text-dim: #666;
+            
+            /* LITE Data Type Colors */
+            --color-num: #00ff41;    /* Neon Green */
+            --color-str: #ff00ea;    /* Neon Pink */
+            --color-func: #ffea00;   /* Yellow */
+            --color-temp: #00eaff;   /* Cyan */
+            
+            --cell-empty: #1a1a1a;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Left Panel: LITE Code --- */
+        .code-panel {
+            width: 45%;
+            min-width: 500px;
+            border-right: 2px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--panel-bg);
+        }
+
+        .header {
+            padding: 15px 20px;
+            background-color: #000;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 { margin: 0; font-size: 16px; text-transform: uppercase; color: #fff; }
+
+        .controls {
+            padding: 10px 20px;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        button {
+            flex: 1; background: transparent; color: #fff; border: 1px solid var(--border-color);
+            padding: 8px; font-family: inherit; font-weight: bold; cursor: pointer; text-transform: uppercase;
+        }
+        button:hover { background: #222; }
+        button.active-btn { border-color: var(--color-num); color: var(--color-num); }
+
+        .editor {
+            flex: 1; padding: 15px 0; font-size: 14px; line-height: 1.5; overflow-y: auto;
+        }
+
+        .code-line {
+            padding: 2px 20px; display: flex; border-left: 3px solid transparent; transition: 0.2s;
+        }
+
+        .code-line.active {
+            background-color: rgba(255, 255, 255, 0.05); border-left: 3px solid var(--color-num);
+        }
+
+        .line-num { color: var(--text-dim); width: 35px; user-select: none; }
+        .keyword { color: #569cd6; font-weight: bold; }
+        .type { color: #4ec9b0; }
+        .string { color: #ce9178; }
+        .comment { color: #6a9955; font-style: italic; }
+
+        /* --- Right Panel: Memory & Console --- */
+        .right-panel {
+            flex: 1; display: flex; flex-direction: column;
+        }
+
+        .memory-section {
+            flex: 1; padding: 20px; display: flex; flex-direction: column; border-bottom: 2px solid var(--border-color);
+        }
+
+        .memory-header { display: flex; justify-content: space-between; margin-bottom: 15px; }
+        .memory-header h2 { margin: 0; font-size: 14px; text-transform: uppercase; }
+
+        .legend { display: flex; gap: 15px; font-size: 12px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-box { width: 12px; height: 12px; }
+
+        .grid-container {
+            display: grid; grid-template-columns: repeat(32, 1fr); gap: 2px; flex: 1; align-content: start;
+        }
+
+        .cell {
+            aspect-ratio: 1; background-color: var(--cell-empty); border-radius: 1px;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .console-section {
+            height: 250px; background: #000; display: flex; flex-direction: column;
+        }
+
+        .console-header {
+            padding: 5px 15px; background: var(--border-color); font-size: 12px; font-weight: bold; text-transform: uppercase;
+        }
+
+        .console-body {
+            flex: 1; padding: 15px; overflow-y: auto; font-size: 14px; white-space: pre-wrap;
+        }
+
+        .log-sys { color: #888; font-size: 12px; margin-bottom: 4px; }
+        .log-out { color: #fff; }
+    </style>
+</head>
+<body>
+
+    <div class="code-panel">
+        <div class="header">
+            <h1>LITE Test Suite // main.lite</h1>
+            <span style="font-size: 12px; color: var(--text-dim)">Spacebar to Step</span>
+        </div>
+        <div class="controls">
+            <button class="active-btn" onclick="nextStep()">Step Forward (Space)</button>
+            <button onclick="resetSim()">Reset Demo</button>
+        </div>
+        <div class="editor" id="editor"></div>
+    </div>
+
+    <div class="right-panel">
+        <div class="memory-section">
+            <div class="memory-header">
+                <h2>KITE RAM Allocation</h2>
+                <div class="legend">
+                    <div class="legend-item"><div class="legend-box" style="background: var(--color-num)"></div> num</div>
+                    <div class="legend-item"><div class="legend-box" style="background: var(--color-str)"></div> str</div>
+                    <div class="legend-item"><div class="legend-box" style="background: var(--color-func)"></div> func ref</div>
+                    <div class="legend-item"><div class="legend-box" style="background: var(--color-temp)"></div> temp/tuple</div>
+                </div>
+            </div>
+            <div class="grid-container" id="grid"></div>
+        </div>
+
+        <div class="console-section">
+            <div class="console-header">Standard Output (STDOUT)</div>
+            <div class="console-body" id="console"></div>
+        </div>
+    </div>
+
+    <script>
+        const GRID_SIZE = 512;
+        
+        // Parsed LITE test code with associated memory allocations and print statements
+        const scriptSteps = [
+            { code: '<span class="comment">? Testing LITE syntax for KITE</span>' },
+            { code: '<span class="type">str</span> mystring <span class="keyword">=</span> <span class="string">"Hello IoT\\n"</span>', action: { type: 'str', size: 10, name: 'mystring', color: 'var(--color-str)' } },
+            { code: '<span class="type">num</span> mynum1, mynum2', action: { type: 'num', size: 8, name: 'mynum1, mynum2', color: 'var(--color-num)' } },
+            { code: '' },
+            { code: 'sayMyName <span class="keyword">::</span> <span class="type">str</span> name <span class="keyword">:</span>', action: { type: 'func', size: 4, name: 'fn:sayMyName', color: 'var(--color-func)' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"Hello %s!\\n"</span>, name&gt;' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span> : name :' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"So Name Is valid!\\n"</span>&gt;' },
+            { code: '' },
+            { code: 'sayMyName&lt;<span class="string">"Abhinandan"</span>&gt;', action: { type: 'temp', size: 10, name: 'arg_str', color: 'var(--color-temp)' }, print: "Hello Abhinandan!\nSo Name Is valid!\n" },
+            { code: '' },
+            { code: 'twice <span class="keyword">:</span> <span class="type">num</span> <span class="keyword">:</span> <span class="type">num</span> x <span class="keyword">:</span>', action: { type: 'func', size: 4, name: 'fn:twice', color: 'var(--color-func)' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="type">num</span> x2 <span class="keyword">=</span> 2 * x' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">done</span> : x2 :' },
+            { code: '' },
+            { code: 'fun2 <span class="keyword">:</span> <span class="type">num</span>, <span class="type">str</span> <span class="keyword">:::</span>', action: { type: 'func', size: 4, name: 'fn:fun2', color: 'var(--color-func)' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">done</span> : 5, <span class="string">"Hello"</span> :' },
+            { code: '' },
+            { code: '<span class="keyword">loop</span> : <span class="type">num</span> i = 0 : i < 10 : i += 1 :', action: { type: 'num', size: 4, name: 'i', color: 'var(--color-num)' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="type">num</span> x2 <span class="keyword">=</span> twice&lt;i&gt;', action: { type: 'num', size: 4, name: 'x2', color: 'var(--color-num)' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"%d %d "</span>, i, x2&gt;', print: "0 0 ", noNewline: true },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">if</span> : i < 3 :' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"< 3"</span>&gt;', print: "< 3", noNewline: true },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">elseif</span> : i < 5 :' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"< 5"</span>&gt;' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">elseif</span> : i < 7 :' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"< 7"</span>&gt;' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">else</span> :' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"< 10"</span>&gt;' },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;printf&lt;<span class="string">"\\n"</span>&gt;', print: "\n", noNewline: true },
+            { code: '' },
+            { code: '<span class="comment">? Fast-forwarding remaining loop iterations...</span>', print: "1 2 < 3\n2 4 < 3\n3 6 < 5\n...\n9 18 < 10\n", noNewline: true },
+            { code: '' },
+            { code: 'sayMyName&lt;mystring&gt;', print: "Hello Hello IoT!\nSo Name Is valid!\n" },
+            { code: '' },
+            { code: '<span class="type">num</span> a', action: { type: 'num', size: 4, name: 'a', color: 'var(--color-num)' } },
+            { code: '<span class="type">str</span> s', action: { type: 'str', size: 4, name: 's_ptr', color: 'var(--color-str)' } },
+            { code: 'a, s <span class="keyword">=</span> fun2&lt;&gt;', action: { type: 'temp', size: 8, name: 'tuple_ret', color: 'var(--color-temp)' } },
+            { code: 'printf&lt;<span class="string">"%s %d\\n"</span>, s, a&gt;', print: "Hello 5\n" }
+        ];
+
+        let currentStepIndex = -1;
+        let memoryPointer = 0;
+
+        const editorEl = document.getElementById('editor');
+        const gridEl = document.getElementById('grid');
+        const consoleEl = document.getElementById('console');
+
+        function init() {
+            scriptSteps.forEach((step, index) => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'code-line';
+                lineDiv.id = `line-${index}`;
+                lineDiv.innerHTML = `<div class="line-num">${index + 1}</div><div class="code-text">${step.code}</div>`;
+                editorEl.appendChild(lineDiv);
+            });
+
+            for (let i = 0; i < GRID_SIZE; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.id = `cell-${i}`;
+                gridEl.appendChild(cell);
+            }
+
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') { e.preventDefault(); nextStep(); }
+            });
+            
+            sysLog("System booted. KITE architecture ready.");
+        }
+
+        function nextStep() {
+            if (currentStepIndex >= 0 && currentStepIndex < scriptSteps.length) {
+                document.getElementById(`line-${currentStepIndex}`).classList.remove('active');
+            }
+
+            currentStepIndex++;
+
+            if (currentStepIndex >= scriptSteps.length) {
+                sysLog("Execution finished. CPU Idle.");
+                return;
+            }
+
+            const currentLineEl = document.getElementById(`line-${currentStepIndex}`);
+            currentLineEl.classList.add('active');
+            
+            // Keeps the active line roughly in the center of the scrolling pane
+            currentLineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+
+            const stepData = scriptSteps[currentStepIndex];
+            
+            if (stepData.action) allocateMemory(stepData.action);
+            if (stepData.print) stdout(stepData.print, stepData.noNewline);
+        }
+
+        function allocateMemory(action) {
+            const startAddr = memoryPointer;
+            if (memoryPointer + action.size > GRID_SIZE) return;
+
+            for (let i = 0; i < action.size; i++) {
+                setTimeout(() => {
+                    const cell = document.getElementById(`cell-${startAddr + i}`);
+                    cell.style.backgroundColor = action.color;
+                    cell.style.boxShadow = `0 0 12px ${action.color}`;
+                    setTimeout(() => { cell.style.boxShadow = 'none'; }, 400);
+                }, i * 40);
+            }
+
+            memoryPointer += action.size;
+            const hexAddr = "0x" + startAddr.toString(16).toUpperCase().padStart(4, '0');
+            sysLog(`[${hexAddr}] Allocated ${action.size} bytes for '${action.name}'`);
+        }
+
+        function sysLog(msg) {
+            const entry = document.createElement('div');
+            entry.className = 'log-sys';
+            entry.innerText = `> ${msg}`;
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function stdout(msg, noNewline = false) {
+            const entry = document.createElement('span');
+            entry.className = 'log-out';
+            entry.innerText = msg;
+            if (!noNewline && !msg.endsWith('\n')) entry.innerText += '\n';
+            
+            consoleEl.appendChild(entry);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function resetSim() {
+            currentStepIndex = -1;
+            memoryPointer = 0;
+            document.querySelectorAll('.code-line').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.cell').forEach(el => {
+                el.style.backgroundColor = '';
+                el.style.boxShadow = 'none';
+            });
+            consoleEl.innerHTML = '';
+            sysLog("System rebooted. Memory flushed.");
+        }
+
+        init();
+    </script>
+</body>
+</html>

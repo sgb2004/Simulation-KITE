@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LITE Memory Allocation Visualizer</title>
+    <style>
+        :root {
+            --bg-base: #050505;
+            --panel-bg: #0f0f0f;
+            --border-color: #333;
+            --text-main: #e0e0e0;
+            --text-dim: #666;
+            
+            /* LITE Data Type Colors */
+            --color-num: #00ff41;    /* Neon Green */
+            --color-str: #ff00ea;    /* Neon Pink */
+            --color-socket: #00eaff; /* Cyan */
+            --color-file: #ffea00;   /* Yellow */
+            
+            --cell-empty: #1a1a1a;
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- Left Panel: LITE Code --- */
+        .code-panel {
+            width: 40%;
+            min-width: 450px;
+            border-right: 2px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--panel-bg);
+        }
+
+        .header {
+            padding: 15px 20px;
+            background-color: #000;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #fff;
+        }
+
+        .controls {
+            padding: 15px 20px;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        button {
+            flex: 1;
+            background: transparent;
+            color: #fff;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            font-family: inherit;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            transition: 0.2s;
+        }
+
+        button:hover { background: #222; }
+        button.active-btn { border-color: var(--color-num); color: var(--color-num); }
+
+        .editor {
+            flex: 1;
+            padding: 20px 0;
+            font-size: 15px;
+            line-height: 1.6;
+            overflow-y: auto;
+        }
+
+        .code-line {
+            padding: 2px 20px;
+            display: flex;
+            transition: 0.3s;
+            border-left: 3px solid transparent;
+        }
+
+        .code-line.active {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-left: 3px solid var(--color-num);
+        }
+
+        .line-num {
+            color: var(--text-dim);
+            width: 30px;
+            user-select: none;
+        }
+
+        .keyword { color: #569cd6; font-weight: bold; }
+        .type { color: #4ec9b0; }
+        .string { color: #ce9178; }
+        .comment { color: #6a9955; font-style: italic; }
+
+        /* --- Right Panel: Memory Grid --- */
+        .memory-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .memory-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .legend {
+            display: flex;
+            gap: 15px;
+            font-size: 12px;
+        }
+
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-box { width: 12px; height: 12px; }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(32, 1fr);
+            gap: 2px;
+            flex: 1;
+            align-content: start;
+        }
+
+        .cell {
+            aspect-ratio: 1;
+            background-color: var(--cell-empty);
+            border-radius: 1px;
+            transition: background-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        .cell.allocated {
+            box-shadow: 0 0 8px inset rgba(0,0,0,0.5);
+        }
+
+        .log-panel {
+            height: 150px;
+            margin-top: 20px;
+            background: #000;
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+
+        .log-entry { margin-bottom: 5px; }
+        .log-addr { color: #888; margin-right: 10px; }
+    </style>
+</head>
+<body>
+
+    <div class="code-panel">
+        <div class="header">
+            <h1>LITE Kernel // boot.lite</h1>
+            <span style="font-size: 12px; color: var(--text-dim)">Spacebar to Step</span>
+        </div>
+        
+        <div class="controls">
+            <button class="active-btn" onclick="nextStep()" id="stepBtn">Step Forward (Space)</button>
+            <button onclick="resetSim()">Reset Hardware</button>
+        </div>
+
+        <div class="editor" id="editor">
+            </div>
+    </div>
+
+    <div class="memory-panel">
+        <div class="memory-header">
+            <h2>KITE Raw RAM View (0x0000 - 0x01FF)</h2>
+            <div class="legend">
+                <div class="legend-item"><div class="legend-box" style="background: var(--color-num)"></div> num (4b)</div>
+                <div class="legend-item"><div class="legend-box" style="background: var(--color-str)"></div> str (dyn)</div>
+                <div class="legend-item"><div class="legend-box" style="background: var(--color-socket)"></div> socket (8b)</div>
+                <div class="legend-item"><div class="legend-box" style="background: var(--color-file)"></div> file (8b)</div>
+            </div>
+        </div>
+
+        <div class="grid-container" id="grid">
+            </div>
+
+        <div class="log-panel" id="log">
+            <div class="log-entry" style="color: #666;">System ready. Awaiting instructions...</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuration & Data ---
+        const GRID_SIZE = 512; // 32x16 grid
+        
+        // The LITE code script and its corresponding memory allocation behavior
+        const scriptSteps = [
+            { code: '<span class="comment">? Initialize node configuration</span>', action: null },
+            { code: '<span class="type">num</span> device_id <span class="keyword">=</span> 4096', action: { type: 'num', size: 4, name: 'device_id', color: 'var(--color-num)' } },
+            { code: '<span class="type">str</span> status <span class="keyword">=</span> <span class="string">"ACTIVE"</span>', action: { type: 'str', size: 14, name: 'status', color: 'var(--color-str)' } },
+            { code: '', action: null },
+            { code: '<span class="comment">? Initialize hardware interfaces</span>', action: null },
+            { code: '<span class="type">socket</span> wifimgr <span class="keyword">=</span> ${WIFI}', action: { type: 'socket', size: 8, name: 'wifimgr', color: 'var(--color-socket)' } },
+            { code: '<span class="type">file</span> spi_bus <span class="keyword">=</span> ${SPI}', action: { type: 'file', size: 8, name: 'spi_bus', color: 'var(--color-file)' } },
+            { code: '', action: null },
+            { code: '<span class="comment">? Main Execution Block</span>', action: null },
+            { code: '<span class="keyword">looptill</span> : status == <span class="string">"ACTIVE"</span> :', action: null },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;wifimgr.send&lt;device_id, <span class="string">"PING"</span>&gt;', action: { type: 'temp', size: 6, name: 'temp_buf', color: '#ffffff' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">trap</span>', action: null },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;spi_bus.write&lt;<span class="string">"LOG"</span>&gt;', action: { type: 'temp', size: 4, name: 'spi_buf', color: '#ffffff' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;<span class="keyword">latch</span> : err :', action: { type: 'num', size: 4, name: 'err', color: '#ff003c' } },
+            { code: '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;status <span class="keyword">:=</span> <span class="string">"FAULT"</span>', action: null }
+        ];
+
+        // --- State ---
+        let currentStepIndex = -1;
+        let memoryPointer = 0; // Tracks next available memory block
+
+        // --- DOM Elements ---
+        const editorEl = document.getElementById('editor');
+        const gridEl = document.getElementById('grid');
+        const logEl = document.getElementById('log');
+
+        // --- Initialization ---
+        function init() {
+            // Build Editor
+            scriptSteps.forEach((step, index) => {
+                const lineDiv = document.createElement('div');
+                lineDiv.className = 'code-line';
+                lineDiv.id = `line-${index}`;
+                lineDiv.innerHTML = `<div class="line-num">${index + 1}</div><div class="code-text">${step.code}</div>`;
+                editorEl.appendChild(lineDiv);
+            });
+
+            // Build Grid
+            for (let i = 0; i < GRID_SIZE; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.id = `cell-${i}`;
+                gridEl.appendChild(cell);
+            }
+
+            // Keyboard listener for Spacebar
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space') {
+                    e.preventDefault(); // Prevent scrolling
+                    nextStep();
+                }
+            });
+        }
+
+        // --- Core Logic ---
+        function nextStep() {
+            // Remove previous active highlight
+            if (currentStepIndex >= 0 && currentStepIndex < scriptSteps.length) {
+                document.getElementById(`line-${currentStepIndex}`).classList.remove('active');
+            }
+
+            currentStepIndex++;
+
+            // End of script check
+            if (currentStepIndex >= scriptSteps.length) {
+                logMessage("--- EXECUTION HALTED ---", "#fff");
+                return;
+            }
+
+            // Highlight new line
+            const currentLineEl = document.getElementById(`line-${currentStepIndex}`);
+            currentLineEl.classList.add('active');
+            
+            // Auto-scroll editor if needed
+            currentLineEl.scrollIntoView({ behavior: "smooth", block: "center" });
+
+            // Process Memory Allocation
+            const stepData = scriptSteps[currentStepIndex];
+            if (stepData.action) {
+                allocateMemory(stepData.action);
+            }
+        }
+
+        function allocateMemory(action) {
+            const startAddr = memoryPointer;
+            
+            // Bounds check
+            if (memoryPointer + action.size > GRID_SIZE) {
+                logMessage("FATAL: Out of Memory!", "#ff0000");
+                return;
+            }
+
+            // Light up the cells sequentially for a cool effect
+            for (let i = 0; i < action.size; i++) {
+                setTimeout(() => {
+                    const cell = document.getElementById(`cell-${startAddr + i}`);
+                    cell.style.backgroundColor = action.color;
+                    cell.style.boxShadow = `0 0 10px ${action.color}`;
+                    cell.classList.add('allocated');
+                    
+                    // Remove glow after a moment, keep color
+                    setTimeout(() => { cell.style.boxShadow = 'none'; }, 500);
+                }, i * 50); // 50ms stagger between blocks
+            }
+
+            memoryPointer += action.size;
+
+            // Format Hex Address (e.g., 0x00A4)
+            const hexAddr = "0x" + startAddr.toString(16).toUpperCase().padStart(4, '0');
+            logMessage(`Allocated ${action.size} bytes for <b>${action.name}</b> (${action.type})`, action.color, hexAddr);
+        }
+
+        function logMessage(msg, color = "#a8cc8c", addr = "SYS_") {
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-addr">[${addr}]</span> <span style="color: ${color}">${msg}</span>`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight; // Auto-scroll log
+        }
+
+        function resetSim() {
+            currentStepIndex = -1;
+            memoryPointer = 0;
+            
+            // Reset Editor UI
+            document.querySelectorAll('.code-line').forEach(el => el.classList.remove('active'));
+            
+            // Reset Grid UI
+            document.querySelectorAll('.cell').forEach(el => {
+                el.style.backgroundColor = '';
+                el.style.boxShadow = 'none';
+                el.classList.remove('allocated');
+            });
+            
+            // Reset Log
+            logEl.innerHTML = '<div class="log-entry" style="color: #666;">System rebooted. Memory cleared.</div>';
+        }
+
+        // Run setup
+        init();
+    </script>
+</body>
+</html>

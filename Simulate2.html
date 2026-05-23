@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LITE Runtime & KITE Swarm Visualizer</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --panel-bg: #0a0a0a;
+            --neon-green: #00ff41;
+            --dark-green: #003300;
+            --neon-red: #ff003c;
+            --text-color: #e0e0e0;
+            --border-color: #1a1a1a;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--neon-green);
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Layout Grid */
+        .sidebar {
+            width: 35%;
+            min-width: 400px;
+            border-right: 2px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--panel-bg);
+        }
+
+        .main-view {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        /* UI Panels */
+        .panel-header {
+            background-color: var(--border-color);
+            color: var(--text-color);
+            padding: 10px;
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .editor-pane {
+            flex: 1;
+            padding: 15px;
+            border-bottom: 2px solid var(--border-color);
+            color: #a8cc8c;
+            line-height: 1.5;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .editor-pane .keyword { color: #eebb00; font-weight: bold; }
+        .editor-pane .operator { color: #66ccff; }
+        .editor-pane .comment { color: #666666; font-style: italic; }
+
+        .terminal-pane {
+            height: 200px;
+            padding: 10px;
+            background-color: #000;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+
+        .controls {
+            padding: 15px;
+            display: flex;
+            gap: 10px;
+            background-color: var(--panel-bg);
+            border-top: 1px solid var(--border-color);
+        }
+
+        button {
+            flex: 1;
+            background-color: transparent;
+            color: var(--neon-green);
+            border: 1px solid var(--neon-green);
+            padding: 12px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+        }
+
+        button:hover {
+            background-color: var(--neon-green);
+            color: #000;
+            box-shadow: 0 0 10px var(--neon-green);
+        }
+
+        button.danger {
+            color: var(--neon-red);
+            border-color: var(--neon-red);
+        }
+
+        button.danger:hover {
+            background-color: var(--neon-red);
+            color: #000;
+            box-shadow: 0 0 10px var(--neon-red);
+        }
+
+        /* Vis.js Canvas Container */
+        #network-canvas {
+            width: 100%;
+            height: 100%;
+            outline: none;
+        }
+
+        /* Terminal Log Formatting */
+        .log-entry { margin: 4px 0; }
+        .log-time { color: #666; margin-right: 10px; }
+        .log-info { color: #00ff41; }
+        .log-error { color: #ff003c; font-weight: bold; }
+        .log-system { color: #66ccff; }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="panel-header">LITE Source // Broadcast.lite</div>
+        <div class="editor-pane">
+<span class="comment">? Initialize KITE hardware socket</span>
+<span class="keyword">socket</span> wifimgr <span class="operator">=</span> ${WIFI}
+<span class="keyword">num</span> active_nodes <span class="operator">=</span> 4
+
+<span class="comment">? Function to broadcast payload</span>
+broadcast :::
+    <span class="keyword">str</span> payload <span class="operator">=</span> "SYS_SYNC_0x9A"
+    
+    <span class="keyword">loop</span> : i=1 : i<=active_nodes : i++ :
+        <span class="keyword">trap</span>
+            wifimgr.send&lt;i, payload&gt;
+            printf&lt;"Packet sent to node %d", i&gt;
+        
+        <span class="keyword">latch</span> : err :
+            printf&lt;"Node %d isolated", i&gt;
+</div>
+
+        <div class="panel-header">KITE Runtime Terminal</div>
+        <div class="terminal-pane" id="terminal">
+            <div class="log-entry"><span class="log-time">[00:00.00]</span><span class="log-system">System booted. KITE bare-metal kernel v1.0.</span></div>
+            <div class="log-entry"><span class="log-time">[00:00.05]</span><span class="log-system">Socket ${WIFI} initialized successfully.</span></div>
+            <div class="log-entry"><span class="log-time">[00:00.12]</span><span class="log-system">Awaiting LITE execution...</span></div>
+        </div>
+
+        <div class="controls">
+            <button onclick="executeBroadcast()">Execute LITE Code</button>
+            <button class="danger" onclick="triggerNodeFailure()">Simulate Failure</button>
+        </div>
+    </div>
+
+    <div class="main-view">
+        <div id="network-canvas"></div>
+    </div>
+
+    <script>
+        // --- 1. Terminal Logic ---
+        const terminal = document.getElementById('terminal');
+        
+        function logToTerminal(message, type = 'info') {
+            const now = new Date();
+            const timeStr = `[${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}.${now.getMilliseconds().toString().padStart(3, '0').substring(0,2)}]`;
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            
+            const colorClass = type === 'error' ? 'log-error' : type === 'system' ? 'log-system' : 'log-info';
+            entry.innerHTML = `<span class="log-time">${timeStr}</span><span class="${colorClass}">${message}</span>`;
+            
+            terminal.appendChild(entry);
+            terminal.scrollTop = terminal.scrollHeight; // Auto-scroll
+        }
+
+        // --- 2. Vis.js Network Setup ---
+        // Create Nodes
+        const nodes = new vis.DataSet([
+            { id: 0, label: 'KITE Gateway\n(Localhost)', shape: 'hexagon', size: 30, color: { background: '#000', border: '#00ff41' }, font: { color: '#00ff41', face: 'monospace' } },
+            { id: 1, label: 'LITE Node 1\n[0x01]', shape: 'dot', size: 15, color: { background: '#000', border: '#00ff41' }, font: { color: '#e0e0e0', face: 'monospace' } },
+            { id: 2, label: 'LITE Node 2\n[0x02]', shape: 'dot', size: 15, color: { background: '#000', border: '#00ff41' }, font: { color: '#e0e0e0', face: 'monospace' } },
+            { id: 3, label: 'LITE Node 3\n[0x03]', shape: 'dot', size: 15, color: { background: '#000', border: '#00ff41' }, font: { color: '#e0e0e0', face: 'monospace' } },
+            { id: 4, label: 'LITE Node 4\n[0x04]', shape: 'dot', size: 15, color: { background: '#000', border: '#00ff41' }, font: { color: '#e0e0e0', face: 'monospace' } }
+        ]);
+
+        // Create Edges
+        const edges = new vis.DataSet([
+            { id: 'e1', from: 0, to: 1, color: { color: '#003300' }, width: 1 },
+            { id: 'e2', from: 0, to: 2, color: { color: '#003300' }, width: 1 },
+            { id: 'e3', from: 0, to: 3, color: { color: '#003300' }, width: 1 },
+            { id: 'e4', from: 0, to: 4, color: { color: '#003300' }, width: 1 }
+        ]);
+
+        const container = document.getElementById('network-canvas');
+        const data = { nodes: nodes, edges: edges };
+        const options = {
+            physics: {
+                solver: 'forceAtlas2Based',
+                forceAtlas2Based: { gravitationalConstant: -100, centralGravity: 0.01, springLength: 200 }
+            },
+            interaction: { hover: true }
+        };
+        
+        const network = new vis.Network(container, data, options);
+        let isNode3Failed = false;
+
+        // --- 3. Animation & Interaction Logic ---
+        function executeBroadcast() {
+            logToTerminal('> Executing broadcast<>...', 'system');
+            
+            // Loop through active nodes and simulate packet sending
+            for (let i = 1; i <= 4; i++) {
+                setTimeout(() => {
+                    if (i === 3 && isNode3Failed) {
+                        // Exception Trapped
+                        logToTerminal(`TRAP TRIGGERED: Node ${i} unreachable.`, 'error');
+                        logToTerminal(`LATCH: Isolating Node ${i} and continuing.`, 'system');
+                    } else {
+                        // Successful Transmission
+                        logToTerminal(`Packet sent to node ${i} via \${WIFI}`);
+                        
+                        // Flash the connection line
+                        edges.update([{ id: `e${i}`, color: { color: '#00ff41' }, width: 4 }]);
+                        
+                        // Revert line after 400ms
+                        setTimeout(() => {
+                            edges.update([{ id: `e${i}`, color: { color: '#003300' }, width: 1 }]);
+                        }, 400);
+                    }
+                }, i * 400); // Stagger the animations
+            }
+        }
+
+        function triggerNodeFailure() {
+            if (isNode3Failed) return; // Prevent double-clicking
+            
+            isNode3Failed = true;
+            logToTerminal('FATAL: Hardware fault detected on LITE Node 3.', 'error');
+            
+            // Turn Node 3 red and update text
+            nodes.update([{ 
+                id: 3, 
+                label: 'LITE Node 3\n[OFFLINE]', 
+                color: { background: '#220000', border: '#ff003c' }, 
+                font: { color: '#ff003c' } 
+            }]);
+            
+            // Make the connection line dashed and red
+            edges.update([{ 
+                id: 'e3', 
+                color: { color: '#550000' }, 
+                dashes: [5, 5] 
+            }]);
+        }
+    </script>
+</body>
+</html>
